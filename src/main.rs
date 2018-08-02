@@ -19,7 +19,27 @@ impl SnapshotTimestamp for Snapshot {
     }
 }
 
+struct Generation {
+    interval: Duration,
+    count: usize,
+}
+
 fn main() {}
+
+fn filter_generation<T: SnapshotTimestamp + Clone + PartialEq>(
+    timestamps: &Vec<T>,
+    generation: &Generation,
+    now: &DateTime<Utc>,
+) -> Vec<T> {
+    let filtered = filter_by_interval(timestamps, &generation.interval, now);
+    let start = if generation.count > filtered.len() {
+        0
+    } else {
+        filtered.len() - generation.count
+    };
+
+    filtered[start..].to_vec()
+}
 
 fn filter_by_interval<T: SnapshotTimestamp + Clone + PartialEq>(
     timestamps: &Vec<T>,
@@ -173,6 +193,48 @@ mod tests {
         ];
 
         let filtered = filter_by_interval(&snapshots, &interval_hour, &now);
+        assert_eq!(filtered, expected);
+    }
+
+    #[test]
+    fn generation_large_count() {
+        let snapshots = vec![
+            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+        ];
+        let generation = Generation {
+            interval: Duration::days(30),
+            count: 99,
+        };
+        let now = Utc.ymd(2018, 4, 5).and_hms(0, 0, 0);
+
+        let filtered = filter_generation(&snapshots, &generation, &now);
+        assert_eq!(filtered.len(), 3);
+    }
+
+    #[test]
+    fn generation_uneven() {
+        let snapshots = vec![
+            TestSnapshot { ts: Utc.ymd(2017, 10, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 3, 18).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 3, 27).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+        ];
+        let generation = Generation {
+            interval: Duration::days(30),
+            count: 3,
+        };
+        let now = Utc.ymd(2018, 4, 5).and_hms(0, 0, 0);
+        let expected = vec![
+            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+        ];
+
+        let filtered = filter_generation(&snapshots, &generation, &now);
         assert_eq!(filtered, expected);
     }
 }
