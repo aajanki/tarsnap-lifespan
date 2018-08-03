@@ -34,7 +34,7 @@ fn keep_generations(
 ) -> HashSet<String> {
     let mut selected: HashSet<String> = generations
         .iter()
-        .flat_map(|gen| filter_generation(snapshots, gen, now))
+        .flat_map(|gen| filter_by_generation(snapshots, gen, now))
         .map(|x| x.name)
         .collect();
 
@@ -47,21 +47,6 @@ fn keep_generations(
     }
 
     selected
-}
-
-fn filter_generation<T: SnapshotTimestamp + Clone + PartialEq>(
-    timestamps: &Vec<T>,
-    generation: &Generation,
-    now: &DateTime<Utc>,
-) -> Vec<T> {
-    let filtered = filter_by_generation(timestamps, generation, now);
-    let start = if generation.count <= filtered.len() {
-        filtered.len() - generation.count
-    } else {
-        0
-    };
-
-    filtered[start..].to_vec()
 }
 
 fn filter_by_generation<T: SnapshotTimestamp + Clone + PartialEq>(
@@ -258,7 +243,7 @@ mod tests {
             TestSnapshot { ts: utc_midnight(2018, 3, 1) },
         ];
 
-        let filtered = filter_generation(&snapshots, &generation, &now);
+        let filtered = filter_by_generation(&snapshots, &generation, &now);
         assert_eq!(filtered, expected);
     }
 
@@ -282,7 +267,7 @@ mod tests {
             TestSnapshot { ts: utc_midnight(2018, 3, 1) },
         ];
 
-        let filtered = filter_generation(&snapshots, &generation, &now);
+        let filtered = filter_by_generation(&snapshots, &generation, &now);
         assert_eq!(filtered, expected);
     }
 
@@ -300,7 +285,7 @@ mod tests {
         };
         let now = Utc.ymd(2018, 8, 1).and_hms(12, 0, 0);
 
-        let filtered = filter_generation(&snapshots, &generation, &now);
+        let filtered = filter_by_generation(&snapshots, &generation, &now);
         assert_eq!(filtered, Vec::new());
     }
 
