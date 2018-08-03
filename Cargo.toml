@@ -5,3 +5,4 @@ authors = ["Antti Ajanki <antti.ajanki@iki.fi>"]
 
 [dependencies]
 chrono = "0.4"
+regex = "1"

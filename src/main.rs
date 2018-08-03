@@ -1,7 +1,11 @@
+use std::collections::HashSet;
+use std::env;
+
+extern crate regex;
+use regex::Regex;
 extern crate chrono;
 use chrono::prelude::*;
 use chrono::Duration;
-use std::collections::HashSet;
 
 
 pub trait SnapshotTimestamp {
@@ -25,7 +29,48 @@ struct Generation {
     count: usize,
 }
 
-fn main() {}
+fn main() {
+    let args: Vec<_> = env::args().collect();
+
+    if args.len() <= 1 {
+        eprintln!("Usage:");
+        eprintln!("{} <number><H|D|M|Y> <...>", args[0]);
+        std::process::exit(1);
+    }
+
+    let generations = parse_generations(args.iter().skip(1).cloned().collect());
+    for gen in generations {
+        println!("{} day generation, count: {}", gen.interval.num_days(), gen.count);
+    }
+}
+
+fn parse_generations(generation_args: Vec<String>) -> Vec<Generation> {
+    fn generation_count_from_arg(arg: &String, hours: i64) -> Generation {
+        Generation {
+            interval: Duration::hours(hours),
+            count: arg[..arg.len()-1].parse::<usize>().unwrap(),
+        }
+    }
+
+    let hour_re = Regex::new(r"^(\d+)H$").unwrap();
+    let day_re = Regex::new(r"^(\d+)D$").unwrap();
+    let month_re = Regex::new(r"^(\d+)M$").unwrap();
+    let year_re = Regex::new(r"^(\d+)Y$").unwrap();
+
+    generation_args.iter().map(|arg| {
+        if hour_re.is_match(arg) {
+            generation_count_from_arg(arg, 1)
+        } else if day_re.is_match(arg) {
+            generation_count_from_arg(arg, 24)
+        } else if month_re.is_match(arg) {
+            generation_count_from_arg(arg, 30*24)
+        } else if year_re.is_match(arg) {
+            generation_count_from_arg(arg, 365*24)
+        } else {
+            panic!("Failed to parse argument {}", arg);
+        }
+    }).collect()
+}
 
 fn keep_generations(
     snapshots: &Vec<Snapshot>,
