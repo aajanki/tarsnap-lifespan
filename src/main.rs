@@ -69,19 +69,8 @@ fn filter_by_generation<T: SnapshotTimestamp + Clone + PartialEq>(
     generation: &Generation,
     now: &DateTime<Utc>,
 ) -> Vec<T> {
-    let t0 = *now - generation.interval * ((generation.count + 1) as i32);
-    filter_range(&timestamps, &generation.interval, &t0, &now)
-}
-
-fn filter_range<T: SnapshotTimestamp + Clone + PartialEq>(
-    timestamps: &Vec<T>,
-    interval: &Duration,
-    start: &DateTime<Utc>,
-    end: &DateTime<Utc>,
-) -> Vec<T> {
-    let mut selected = (1..)
-        .map(|i| *end - *interval * i)
-        .take_while(|t| t > start)
+    let mut selected = (1..(generation.count + 1))
+        .map(|i| *now - generation.interval * (i as i32))
         .fold(Vec::new(), |mut acc, step| {
             let closest = timestamps.iter().min_by_key(|t| {
                 (t.timestamp().timestamp() - step.timestamp()).abs()
