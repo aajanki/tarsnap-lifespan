@@ -1,6 +1,7 @@
 extern crate chrono;
 use chrono::prelude::*;
 use chrono::Duration;
+use std::collections::HashSet;
 
 
 pub trait SnapshotTimestamp {
@@ -26,29 +27,50 @@ struct Generation {
 
 fn main() {}
 
+fn keep_generations(
+    snapshots: &Vec<Snapshot>,
+    generations: &Vec<Generation>,
+    now: &DateTime<Utc>,
+) -> HashSet<String> {
+    let mut selected: HashSet<String> = generations
+        .iter()
+        .flat_map(|gen| filter_generation(snapshots, gen, now))
+        .map(|x| x.name)
+        .collect();
+
+    // Always keep the latest snapshot
+    let maybe_latest = snapshots.iter().max_by_key(|x| x.timestamp()).map(|x| {
+        x.name.clone()
+    });
+    if let Some(latest) = maybe_latest {
+        selected.insert(latest);
+    }
+
+    selected
+}
+
 fn filter_generation<T: SnapshotTimestamp + Clone + PartialEq>(
     timestamps: &Vec<T>,
     generation: &Generation,
     now: &DateTime<Utc>,
 ) -> Vec<T> {
-    let filtered = filter_by_interval(timestamps, &generation.interval, now);
-    let start = if generation.count > filtered.len() {
-        0
-    } else {
+    let filtered = filter_by_generation(timestamps, generation, now);
+    let start = if generation.count <= filtered.len() {
         filtered.len() - generation.count
+    } else {
+        0
     };
 
     filtered[start..].to_vec()
 }
 
-fn filter_by_interval<T: SnapshotTimestamp + Clone + PartialEq>(
+fn filter_by_generation<T: SnapshotTimestamp + Clone + PartialEq>(
     timestamps: &Vec<T>,
-    interval: &Duration,
+    generation: &Generation,
     now: &DateTime<Utc>,
 ) -> Vec<T> {
-    timestamps.iter().map(|x| x.timestamp()).min().map_or(Vec::new(), |t| {
-        filter_range(&timestamps, &interval, &t, &now)
-    })
+    let t0 = *now - generation.interval * ((generation.count + 1) as i32);
+    filter_range(&timestamps, &generation.interval, &t0, &now)
 }
 
 fn filter_range<T: SnapshotTimestamp + Clone + PartialEq>(
@@ -57,7 +79,7 @@ fn filter_range<T: SnapshotTimestamp + Clone + PartialEq>(
     start: &DateTime<Utc>,
     end: &DateTime<Utc>,
 ) -> Vec<T> {
-    let mut selected = (0..)
+    let mut selected = (1..)
         .map(|i| *end - *interval * i)
         .take_while(|t| t > start)
         .fold(Vec::new(), |mut acc, step| {
@@ -95,22 +117,62 @@ mod tests {
         }
     }
 
+    fn test_generations() -> Vec<Generation> {
+        vec![
+            Generation {
+                interval: Duration::days(1),
+                count: 6,
+            },
+            Generation {
+                interval: Duration::days(30),
+                count: 4,
+            },
+            Generation {
+                interval: Duration::days(365),
+                count: 1,
+            },
+        ]
+    }
+
+    fn hour_generation(n: usize) -> Generation {
+        Generation {
+            interval: Duration::hours(1),
+            count: n,
+        }
+    }
+
+    fn day_generation(n: usize) -> Generation {
+        Generation {
+            interval: Duration::days(1),
+            count: n,
+        }
+    }
+
+    fn month_generation(n: usize) -> Generation {
+        Generation {
+            interval: Duration::days(30),
+            count: n,
+        }
+    }
+
+    fn utc_midnight(year: i32, month: u32, day: u32) -> DateTime<Utc> {
+        Utc.ymd(year, month, day).and_hms(0, 0, 0)
+    }
+
     #[test]
     fn filter_empty() {
         let snapshots: Vec<Snapshot> = vec![];
-        let interval_day = Duration::days(1);
         let now = Utc.ymd(2018, 7, 14).and_hms(14, 0, 0);
-        let filtered = filter_by_interval(&snapshots, &interval_day, &now);
+        let filtered = filter_by_generation(&snapshots, &day_generation(6), &now);
 
         assert_eq!(filtered, []);
     }
 
     #[test]
     fn filter_one() {
-        let snapshots = vec![TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) }];
-        let interval_day = Duration::days(1);
+        let snapshots = vec![TestSnapshot { ts: utc_midnight(2018, 7, 10) }];
         let now = Utc.ymd(2018, 7, 14).and_hms(14, 0, 0);
-        let filtered = filter_by_interval(&snapshots, &interval_day, &now);
+        let filtered = filter_by_generation(&snapshots, &day_generation(6), &now);
 
         assert_eq!(filtered, snapshots);
     }
@@ -118,6 +180,8 @@ mod tests {
     #[test]
     fn filter_even_intervals() {
         let snapshots = vec![
+            TestSnapshot { ts: Utc.ymd(2018, 7, 13).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 7, 13).and_hms(12, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 7, 14).and_hms(0, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 7, 14).and_hms(12, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 7, 15).and_hms(0, 0, 0) },
@@ -127,37 +191,33 @@ mod tests {
             TestSnapshot { ts: Utc.ymd(2018, 7, 17).and_hms(0, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 7, 17).and_hms(12, 0, 0) },
         ];
-        let interval_day = Duration::days(1);
         let now = Utc.ymd(2018, 7, 17).and_hms(14, 0, 0);
         let expected = vec![
             TestSnapshot { ts: Utc.ymd(2018, 7, 14).and_hms(12, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 7, 15).and_hms(12, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 7, 16).and_hms(12, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 7, 17).and_hms(12, 0, 0) },
         ];
 
-        let filtered = filter_by_interval(&snapshots, &interval_day, &now);
+        let filtered = filter_by_generation(&snapshots, &day_generation(3), &now);
         assert_eq!(filtered, expected);
     }
 
     #[test]
     fn filter_uneven_intervals() {
         let snapshots = vec![
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 18).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 27).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: utc_midnight(2018, 1, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 18) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 27) },
+            TestSnapshot { ts: utc_midnight(2018, 4, 1) },
         ];
-        let interval_month = Duration::days(30);
-        let now = Utc.ymd(2018, 4, 5).and_hms(0, 0, 0);
+        let now = utc_midnight(2018, 4, 5);
         let expected = vec![
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: utc_midnight(2018, 1, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
         ];
 
-        let filtered = filter_by_interval(&snapshots, &interval_month, &now);
+        let filtered = filter_by_generation(&snapshots, &month_generation(4), &now);
         assert_eq!(filtered, expected);
     }
 
@@ -166,75 +226,377 @@ mod tests {
         let snapshots = vec![
             TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
             TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(2, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(3, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(3, 1, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 25, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(1, 10, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(2, 30, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(2, 40, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(3, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(3, 15, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(3, 20, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(6, 15, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(13, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(0, 25, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(1, 10, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(2, 30, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(2, 40, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(3, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(3, 15, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(3, 20, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(6, 15, 0) },
         ];
-        let interval_hour = Duration::hours(1);
-        let now = Utc.ymd(2018, 4, 1).and_hms(10, 30, 0);
+        let now = Utc.ymd(2018, 4, 2).and_hms(10, 30, 0);
         let expected = vec![
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(2, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(3, 1, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 25, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(1, 10, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(2, 30, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(3, 20, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(6, 15, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(13, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(0, 0, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(0, 25, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(1, 10, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(2, 30, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(3, 20, 0) },
+            TestSnapshot { ts: Utc.ymd(2018, 4, 2).and_hms(6, 15, 0) },
         ];
 
-        let filtered = filter_by_interval(&snapshots, &interval_hour, &now);
+        let filtered = filter_by_generation(&snapshots, &hour_generation(24), &now);
         assert_eq!(filtered, expected);
     }
 
     #[test]
     fn generation_large_count() {
         let snapshots = vec![
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: utc_midnight(2018, 1, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 4, 1) },
         ];
         let generation = Generation {
             interval: Duration::days(30),
             count: 99,
         };
-        let now = Utc.ymd(2018, 4, 5).and_hms(0, 0, 0);
+        let now = utc_midnight(2018, 4, 5);
+        let expected = vec![
+            TestSnapshot { ts: utc_midnight(2018, 1, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
+        ];
 
         let filtered = filter_generation(&snapshots, &generation, &now);
-        assert_eq!(filtered.len(), 3);
+        assert_eq!(filtered, expected);
     }
 
     #[test]
     fn generation_uneven() {
         let snapshots = vec![
-            TestSnapshot { ts: Utc.ymd(2017, 10, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 18).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 27).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: utc_midnight(2017, 10, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 1, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 18) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 27) },
+            TestSnapshot { ts: utc_midnight(2018, 4, 1) },
         ];
         let generation = Generation {
             interval: Duration::days(30),
             count: 3,
         };
-        let now = Utc.ymd(2018, 4, 5).and_hms(0, 0, 0);
+        let now = utc_midnight(2018, 4, 5);
         let expected = vec![
-            TestSnapshot { ts: Utc.ymd(2018, 1, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 3, 1).and_hms(0, 0, 0) },
-            TestSnapshot { ts: Utc.ymd(2018, 4, 1).and_hms(0, 0, 0) },
+            TestSnapshot { ts: utc_midnight(2018, 1, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
         ];
 
         let filtered = filter_generation(&snapshots, &generation, &now);
+        assert_eq!(filtered, expected);
+    }
+
+    #[test]
+    fn zero_count_generation() {
+        let snapshots = vec![
+            TestSnapshot { ts: utc_midnight(2018, 3, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 4, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 5, 1) },
+            TestSnapshot { ts: utc_midnight(2018, 6, 1) },
+        ];
+        let generation = Generation {
+            interval: Duration::days(30),
+            count: 0,
+        };
+        let now = Utc.ymd(2018, 8, 1).and_hms(12, 0, 0);
+
+        let filtered = filter_generation(&snapshots, &generation, &now);
+        assert_eq!(filtered, Vec::new());
+    }
+
+    #[test]
+    fn generations_empty() {
+        let snapshots = vec![];
+        let now = Utc.ymd(2018, 8, 1).and_hms(12, 0, 0);
+
+        let filtered = keep_generations(&snapshots, &test_generations(), &now);
+        assert_eq!(filtered, HashSet::new());
+    }
+
+    #[test]
+    fn generations_1() {
+        let snapshots = vec![
+            Snapshot {
+                name: "two_years_ago".to_string(),
+                ts: utc_midnight(2016, 6, 1),
+            },
+            Snapshot {
+                name: "last_year".to_string(),
+                ts: utc_midnight(2017, 6, 1),
+            },
+            Snapshot {
+                name: "jan_1".to_string(),
+                ts: utc_midnight(2018, 1, 1),
+            },
+            Snapshot {
+                name: "feb_1".to_string(),
+                ts: utc_midnight(2018, 2, 1),
+            },
+            Snapshot {
+                name: "feb_27".to_string(),
+                ts: utc_midnight(2018, 2, 27),
+            },
+            Snapshot {
+                name: "feb_28".to_string(),
+                ts: utc_midnight(2018, 2, 28),
+            },
+            Snapshot {
+                name: "mar_1".to_string(),
+                ts: utc_midnight(2018, 3, 1),
+            },
+            Snapshot {
+                name: "apr_1".to_string(),
+                ts: utc_midnight(2018, 4, 1),
+            },
+            Snapshot {
+                name: "may_1".to_string(),
+                ts: utc_midnight(2018, 5, 1),
+            },
+            Snapshot {
+                name: "jun_1".to_string(),
+                ts: utc_midnight(2018, 6, 1),
+            },
+            Snapshot {
+                name: "jun_2".to_string(),
+                ts: utc_midnight(2018, 6, 2),
+            },
+            Snapshot {
+                name: "jun_3".to_string(),
+                ts: utc_midnight(2018, 6, 3),
+            },
+            Snapshot {
+                name: "jun_4".to_string(),
+                ts: utc_midnight(2018, 6, 4),
+            },
+            Snapshot {
+                name: "jun_5".to_string(),
+                ts: utc_midnight(2018, 6, 5),
+            },
+            Snapshot {
+                name: "jun_6".to_string(),
+                ts: utc_midnight(2018, 6, 6),
+            },
+        ];
+        let now = Utc.ymd(2018, 6, 6).and_hms(16, 0, 0);
+
+        let expected: HashSet<String> = vec![
+            "last_year".to_string(),
+            "feb_1".to_string(),
+            "mar_1".to_string(),
+            "apr_1".to_string(),
+            "may_1".to_string(),
+            "jun_1".to_string(),
+            "jun_2".to_string(),
+            "jun_3".to_string(),
+            "jun_4".to_string(),
+            "jun_5".to_string(),
+            "jun_6".to_string(),
+        ].iter()
+            .cloned()
+            .collect();
+
+        let filtered = keep_generations(&snapshots, &test_generations(), &now);
+        assert_eq!(filtered, expected);
+    }
+
+    #[test]
+    fn generations_2() {
+        let snapshots = vec![
+            Snapshot {
+                name: "two_years_ago".to_string(),
+                ts: utc_midnight(2016, 6, 1),
+            },
+            Snapshot {
+                name: "last_year".to_string(),
+                ts: utc_midnight(2017, 6, 1),
+            },
+            Snapshot {
+                name: "jan_1".to_string(),
+                ts: utc_midnight(2018, 1, 1),
+            },
+            Snapshot {
+                name: "feb_1".to_string(),
+                ts: utc_midnight(2018, 2, 1),
+            },
+            Snapshot {
+                name: "mar_1".to_string(),
+                ts: utc_midnight(2018, 3, 1),
+            },
+            Snapshot {
+                name: "apr_1".to_string(),
+                ts: utc_midnight(2018, 4, 1),
+            },
+            Snapshot {
+                name: "may_1".to_string(),
+                ts: utc_midnight(2018, 5, 1),
+            },
+            Snapshot {
+                name: "jun_6".to_string(),
+                ts: utc_midnight(2018, 6, 6),
+            },
+            Snapshot {
+                name: "jun_7".to_string(),
+                ts: utc_midnight(2018, 6, 7),
+            },
+            Snapshot {
+                name: "jun_8".to_string(),
+                ts: utc_midnight(2018, 6, 8),
+            },
+            Snapshot {
+                name: "jun_9".to_string(),
+                ts: utc_midnight(2018, 6, 9),
+            },
+            Snapshot {
+                name: "jun_10".to_string(),
+                ts: utc_midnight(2018, 6, 10),
+            },
+            Snapshot {
+                name: "jun_11".to_string(),
+                ts: utc_midnight(2018, 6, 11),
+            },
+            Snapshot {
+                name: "jun_12".to_string(),
+                ts: utc_midnight(2018, 6, 12),
+            },
+        ];
+        let now = Utc.ymd(2018, 6, 12).and_hms(16, 0, 0);
+
+        let expected: HashSet<String> = vec![
+            "last_year".to_string(),
+            "feb_1".to_string(),
+            "mar_1".to_string(),
+            "apr_1".to_string(),
+            "may_1".to_string(),
+            "jun_7".to_string(),
+            "jun_8".to_string(),
+            "jun_9".to_string(),
+            "jun_10".to_string(),
+            "jun_11".to_string(),
+            "jun_12".to_string(),
+        ].iter()
+            .cloned()
+            .collect();
+
+        let filtered = keep_generations(&snapshots, &test_generations(), &now);
+        assert_eq!(filtered, expected);
+    }
+
+    #[test]
+    fn generations_3() {
+        let snapshots = vec![
+            Snapshot {
+                name: "two_years_ago".to_string(),
+                ts: utc_midnight(2016, 6, 1),
+            },
+            Snapshot {
+                name: "last_year".to_string(),
+                ts: utc_midnight(2017, 6, 1),
+            },
+            Snapshot {
+                name: "jan_1".to_string(),
+                ts: utc_midnight(2018, 1, 1),
+            },
+            Snapshot {
+                name: "feb_1".to_string(),
+                ts: utc_midnight(2018, 2, 1),
+            },
+            Snapshot {
+                name: "mar_1".to_string(),
+                ts: utc_midnight(2018, 3, 1),
+            },
+            Snapshot {
+                name: "apr_1".to_string(),
+                ts: utc_midnight(2018, 4, 1),
+            },
+            Snapshot {
+                name: "may_1".to_string(),
+                ts: utc_midnight(2018, 5, 1),
+            },
+            Snapshot {
+                name: "jun_20".to_string(),
+                ts: utc_midnight(2018, 6, 20),
+            },
+            Snapshot {
+                name: "jun_21".to_string(),
+                ts: utc_midnight(2018, 6, 21),
+            },
+            Snapshot {
+                name: "jun_22".to_string(),
+                ts: utc_midnight(2018, 6, 22),
+            },
+            Snapshot {
+                name: "jun_23".to_string(),
+                ts: utc_midnight(2018, 6, 23),
+            },
+            Snapshot {
+                name: "jun_24".to_string(),
+                ts: utc_midnight(2018, 6, 24),
+            },
+            Snapshot {
+                name: "jun_25".to_string(),
+                ts: utc_midnight(2018, 6, 25),
+            },
+            Snapshot {
+                name: "jun_26".to_string(),
+                ts: utc_midnight(2018, 6, 26),
+            },
+        ];
+        let now = Utc.ymd(2018, 6, 26).and_hms(16, 0, 0);
+
+        let expected: HashSet<String> = vec![
+            "last_year".to_string(),
+            "mar_1".to_string(),
+            "apr_1".to_string(),
+            "may_1".to_string(),
+            "jun_20".to_string(),
+            "jun_21".to_string(),
+            "jun_22".to_string(),
+            "jun_23".to_string(),
+            "jun_24".to_string(),
+            "jun_25".to_string(),
+            "jun_26".to_string(),
+        ].iter()
+            .cloned()
+            .collect();
+
+        let filtered = keep_generations(&snapshots, &test_generations(), &now);
+        assert_eq!(filtered, expected);
+    }
+
+    #[test]
+    fn generations_after_long_break() {
+        let snapshots = vec![
+            Snapshot {
+                name: "jan_1".to_string(),
+                ts: utc_midnight(2018, 1, 1),
+            },
+            Snapshot {
+                name: "feb_1".to_string(),
+                ts: utc_midnight(2018, 2, 1),
+            },
+            Snapshot {
+                name: "mar_1".to_string(),
+                ts: utc_midnight(2018, 3, 1),
+            },
+        ];
+        let now = Utc.ymd(2018, 12, 1).and_hms(12, 0, 0);
+        let expected: HashSet<String> = vec!["jan_1".to_string(), "mar_1".to_string()]
+            .iter()
+            .cloned()
+            .collect();
+
+        let filtered = keep_generations(&snapshots, &test_generations(), &now);
         assert_eq!(filtered, expected);
     }
 }
