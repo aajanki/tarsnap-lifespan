@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 use std::env;
+use std::error::Error;
 
 extern crate regex;
 use regex::Regex;
 extern crate chrono;
 use chrono::prelude::*;
-use chrono::Duration;
-
+use chrono::{Duration, NaiveDateTime};
+#[macro_use]
+extern crate indoc;
 
 pub trait SnapshotTimestamp {
     fn timestamp(&self) -> DateTime<Utc>;
@@ -40,7 +42,11 @@ fn main() {
 
     let generations = parse_generations(args.iter().skip(1).cloned().collect());
     for gen in generations {
-        println!("{} day generation, count: {}", gen.interval.num_days(), gen.count);
+        println!(
+            "{} day generation, count: {}",
+            gen.interval.num_days(),
+            gen.count
+        );
     }
 }
 
@@ -48,7 +54,7 @@ fn parse_generations(generation_args: Vec<String>) -> Vec<Generation> {
     fn generation_count_from_arg(arg: &String, hours: i64) -> Generation {
         Generation {
             interval: Duration::hours(hours),
-            count: arg[..arg.len()-1].parse::<usize>().unwrap(),
+            count: arg[..arg.len() - 1].parse::<usize>().unwrap(),
         }
     }
 
@@ -57,19 +63,55 @@ fn parse_generations(generation_args: Vec<String>) -> Vec<Generation> {
     let month_re = Regex::new(r"^(\d+)M$").unwrap();
     let year_re = Regex::new(r"^(\d+)Y$").unwrap();
 
-    generation_args.iter().map(|arg| {
-        if hour_re.is_match(arg) {
+    generation_args
+        .iter()
+        .map(|arg| if hour_re.is_match(arg) {
             generation_count_from_arg(arg, 1)
         } else if day_re.is_match(arg) {
             generation_count_from_arg(arg, 24)
         } else if month_re.is_match(arg) {
-            generation_count_from_arg(arg, 30*24)
+            generation_count_from_arg(arg, 30 * 24)
         } else if year_re.is_match(arg) {
-            generation_count_from_arg(arg, 365*24)
+            generation_count_from_arg(arg, 365 * 24)
         } else {
             panic!("Failed to parse argument {}", arg);
-        }
-    }).collect()
+        })
+        .collect()
+}
+
+// Parse the snapshot names and creation times from the "tarsnap
+// --list-archives -v" output
+fn parse_archives(archives: &String) -> Result<Vec<Snapshot>, String> {
+    archives
+        .split_terminator('\n')
+        .map(|row| parse_archive_row(row))
+        .collect()
+}
+
+// Parse one line of --list-archives -v output. For example:
+// archive-2018-07-16_11-01-03       2018-07-16 11:01:03
+fn parse_archive_row(row: &str) -> Result<Snapshot, String> {
+    let parts: Vec<&str> = row.splitn(2, ' ').collect();
+    if parts.len() == 2 {
+        parse_local_datetime_from_str(parts[1].trim()).map(|t| {
+            Snapshot {
+                name: parts[0].to_string(),
+                ts: t,
+            }
+        })
+    } else {
+        let mut msg = "Failed to parse timestamp: ".to_string();
+        msg.push_str(row);
+        Err(msg)
+    }
+}
+
+// Parse timestamp from string such as "2018-07-14 11:15:32"
+fn parse_local_datetime_from_str(s: &str) -> Result<DateTime<Utc>, String> {
+    // FIXME: Assumes UTC
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+        .map(|t| DateTime::<Utc>::from_utc(t, Utc))
+        .map_err(|err| err.description().to_string())
 }
 
 fn keep_generations(
@@ -617,5 +659,45 @@ mod tests {
 
         let filtered = keep_generations(&snapshots, &test_generations(), &now);
         assert_eq!(filtered, expected);
+    }
+
+    #[test]
+    fn archives_empty_input() {
+        assert_eq!(parse_archives(&"".to_string()), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn archives_missing_timestamp() {
+        let test_archives = indoc!(
+            "archive-001     2018-07-22 15:10:48
+             archive-002
+             archive-003     2018-08-01 10:35:08"
+        ).to_string();
+        assert_eq!(parse_archives(&test_archives).is_err(), true);
+    }
+
+    #[test]
+    fn archives_valid() {
+        let test_archives = indoc!(
+            "archive-001     2018-07-22 15:10:48
+             archive-002     2018-07-23 23:43:51
+             archive-003     2018-08-01 10:35:08"
+        ).to_string();
+        let expected = Ok(vec![
+            Snapshot {
+                name: "archive-001".to_string(),
+                ts: Utc.ymd(2018, 7, 22).and_hms(15, 10, 48),
+            },
+            Snapshot {
+                name: "archive-002".to_string(),
+                ts: Utc.ymd(2018, 7, 23).and_hms(23, 43, 51),
+            },
+            Snapshot {
+                name: "archive-003".to_string(),
+                ts: Utc.ymd(2018, 8, 1).and_hms(10, 35, 8),
+            },
+        ]);
+
+        assert_eq!(parse_archives(&test_archives), expected);
     }
 }
