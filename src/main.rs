@@ -137,16 +137,18 @@ fn parse_local_datetime_from_str(s: &str) -> Result<DateTime<Utc>, String> {
 }
 
 fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
+    let mut sorted_names = snapshot_names.clone();
+    sorted_names.sort_unstable();
     println!(
         "snapshots selected for deletion: {}",
-        snapshot_names.join(", ")
+        sorted_names.join(", ")
     );
 
-    if snapshot_names.is_empty() {
+    if sorted_names.is_empty() {
         // nothing to do
         Ok(())
     } else {
-        let snapshot_name_args = snapshot_names.iter().flat_map(|name| vec!["-f", name]);
+        let snapshot_name_args = sorted_names.iter().flat_map(|name| vec!["-f", name]);
         Command::new("/usr/bin/tarsnap")
             .arg("-d")
             .args(snapshot_name_args)
