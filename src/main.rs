@@ -114,7 +114,7 @@ fn parse_archives(archives: String) -> Result<Vec<Snapshot>, String> {
 // Parse one line of --list-archives -v output. For example:
 // archive-2018-07-16_11-01-03       2018-07-16 11:01:03
 fn parse_archive_row(row: &str) -> Result<Snapshot, String> {
-    let parts: Vec<&str> = row.splitn(2, ' ').collect();
+    let parts: Vec<&str> = row.splitn(2, '\t').collect();
     if parts.len() == 2 {
         parse_local_datetime_from_str(parts[1].trim()).map(|t| {
             Snapshot {
@@ -709,9 +709,9 @@ mod tests {
     #[test]
     fn archives_missing_timestamp() {
         let test_archives = indoc!(
-            "archive-001     2018-07-22 15:10:48
+            "archive-001\t2018-07-22 15:10:48
              archive-002
-             archive-003     2018-08-01 10:35:08"
+             archive-003\t2018-08-01 10:35:08"
         ).to_string();
         assert_eq!(parse_archives(test_archives).is_err(), true);
     }
@@ -719,9 +719,9 @@ mod tests {
     #[test]
     fn archives_valid() {
         let test_archives = indoc!(
-            "archive-001     2018-07-22 15:10:48
-             archive-002     2018-07-23 23:43:51
-             archive-003     2018-08-01 10:35:08"
+            "archive-001\t2018-07-22 15:10:48
+             archive-002\t2018-07-23 23:43:51
+             archive-003\t2018-08-01 10:35:08"
         ).to_string();
         let expected = Ok(vec![
             Snapshot {
