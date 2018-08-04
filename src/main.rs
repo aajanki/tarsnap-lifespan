@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::env;
 use std::error::Error;
+use std::process::Command;
 
 extern crate regex;
 use regex::Regex;
@@ -88,7 +89,17 @@ fn parse_generations(generation_args: Vec<String>) -> Result<Vec<Generation>, St
 }
 
 fn list_archives() -> Result<String, String> {
-    Ok("".to_string())
+    Command::new("/usr/bin/tarsnap")
+        .arg("--list-archives")
+        .arg("-v")
+        .env("TZ", "0")
+        .output()
+        .map_err(|err| err.to_string())
+        .and_then(|output| if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        })
 }
 
 // Parse the snapshot names and creation times from the "tarsnap
@@ -120,7 +131,6 @@ fn parse_archive_row(row: &str) -> Result<Snapshot, String> {
 
 // Parse timestamp from string such as "2018-07-14 11:15:32"
 fn parse_local_datetime_from_str(s: &str) -> Result<DateTime<Utc>, String> {
-    // FIXME: Assumes UTC
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
         .map(|t| DateTime::<Utc>::from_utc(t, Utc))
         .map_err(|err| err.description().to_string())
