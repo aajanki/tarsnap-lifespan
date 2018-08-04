@@ -40,13 +40,18 @@ fn main() {
         std::process::exit(1);
     }
 
+    let now = Utc::now();
     let generations = parse_generations(args.iter().skip(1).cloned().collect());
-    for gen in generations {
-        println!(
-            "{} day generation, count: {}",
-            gen.interval.num_days(),
-            gen.count
-        );
+    let res = list_archives()
+        .and_then(parse_archives)
+        .map(|snapshots| {
+            select_snapshots_to_delete(&generations, &now, snapshots)
+        })
+        .and_then(delete_snapshots);
+
+    if res.is_err() {
+        eprintln!("ERROR: {}", res.unwrap_err());
+        std::process::exit(1);
     }
 }
 
@@ -79,9 +84,13 @@ fn parse_generations(generation_args: Vec<String>) -> Vec<Generation> {
         .collect()
 }
 
+fn list_archives() -> Result<String, String> {
+    Ok("".to_string())
+}
+
 // Parse the snapshot names and creation times from the "tarsnap
 // --list-archives -v" output
-fn parse_archives(archives: &String) -> Result<Vec<Snapshot>, String> {
+fn parse_archives(archives: String) -> Result<Vec<Snapshot>, String> {
     archives
         .split_terminator('\n')
         .map(|row| parse_archive_row(row))
@@ -112,6 +121,24 @@ fn parse_local_datetime_from_str(s: &str) -> Result<DateTime<Utc>, String> {
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
         .map(|t| DateTime::<Utc>::from_utc(t, Utc))
         .map_err(|err| err.description().to_string())
+}
+
+fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
+    println!(
+        "snapshots selected for deletion: {}",
+        snapshot_names.join(", ")
+    );
+    Ok(())
+}
+
+fn select_snapshots_to_delete(
+    generations: &Vec<Generation>,
+    now: &DateTime<Utc>,
+    snapshots: Vec<Snapshot>,
+) -> Vec<String> {
+    let all_names: HashSet<String> = snapshots.iter().map(|x| x.name.clone()).collect();
+    let keep_names = keep_generations(&snapshots, generations, now);
+    all_names.difference(&keep_names).cloned().collect()
 }
 
 fn keep_generations(
@@ -663,7 +690,7 @@ mod tests {
 
     #[test]
     fn archives_empty_input() {
-        assert_eq!(parse_archives(&"".to_string()), Ok(Vec::new()));
+        assert_eq!(parse_archives("".to_string()), Ok(Vec::new()));
     }
 
     #[test]
@@ -673,7 +700,7 @@ mod tests {
              archive-002
              archive-003     2018-08-01 10:35:08"
         ).to_string();
-        assert_eq!(parse_archives(&test_archives).is_err(), true);
+        assert_eq!(parse_archives(test_archives).is_err(), true);
     }
 
     #[test]
@@ -698,6 +725,6 @@ mod tests {
             },
         ]);
 
-        assert_eq!(parse_archives(&test_archives), expected);
+        assert_eq!(parse_archives(test_archives), expected);
     }
 }
