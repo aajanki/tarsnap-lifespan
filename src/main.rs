@@ -41,13 +41,14 @@ fn main() {
     }
 
     let now = Utc::now();
-    let generations = parse_generations(args.iter().skip(1).cloned().collect());
-    let res = list_archives()
-        .and_then(parse_archives)
-        .map(|snapshots| {
-            select_snapshots_to_delete(&generations, &now, snapshots)
-        })
-        .and_then(delete_snapshots);
+    let res = parse_generations(args.iter().skip(1).cloned().collect()).and_then(|generations| {
+        list_archives()
+            .and_then(parse_archives)
+            .map(|snapshots| {
+                select_snapshots_to_delete(&generations, &now, snapshots)
+            })
+            .and_then(delete_snapshots)
+    });
 
     if res.is_err() {
         eprintln!("ERROR: {}", res.unwrap_err());
@@ -55,12 +56,12 @@ fn main() {
     }
 }
 
-fn parse_generations(generation_args: Vec<String>) -> Vec<Generation> {
-    fn generation_count_from_arg(arg: &String, hours: i64) -> Generation {
-        Generation {
+fn parse_generations(generation_args: Vec<String>) -> Result<Vec<Generation>, String> {
+    fn generation_count_from_arg(arg: &String, hours: i64) -> Result<Generation, String> {
+        Ok(Generation {
             interval: Duration::hours(hours),
             count: arg[..arg.len() - 1].parse::<usize>().unwrap(),
-        }
+        })
     }
 
     let hour_re = Regex::new(r"^(\d+)H$").unwrap();
@@ -79,7 +80,9 @@ fn parse_generations(generation_args: Vec<String>) -> Vec<Generation> {
         } else if year_re.is_match(arg) {
             generation_count_from_arg(arg, 365 * 24)
         } else {
-            panic!("Failed to parse argument {}", arg);
+            let mut msg = "Failed to parse argument".to_string();
+            msg.push_str(arg);
+            Err(msg)
         })
         .collect()
 }
