@@ -141,7 +141,18 @@ fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
         "snapshots selected for deletion: {}",
         snapshot_names.join(", ")
     );
-    Ok(())
+
+    let snapshot_name_args = snapshot_names.iter().flat_map(|name| vec!["-f", name]);
+    Command::new("/usr/bin/tarsnap")
+        .arg("-d")
+        .args(snapshot_name_args)
+        .output()
+        .map_err(|err| err.to_string())
+        .and_then(|output| if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        })
 }
 
 fn select_snapshots_to_delete(
