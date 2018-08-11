@@ -10,6 +10,8 @@ use chrono::prelude::*;
 use chrono::{Duration, NaiveDateTime};
 #[macro_use]
 extern crate indoc;
+#[macro_use] extern crate log;
+extern crate stderrlog;
 
 const TARSNAP_BINARY: &str = "tarsnap";
 
@@ -35,6 +37,8 @@ struct Generation {
 }
 
 fn main() {
+    stderrlog::new().module(module_path!()).verbosity(2).init().unwrap();
+
     let args: Vec<_> = env::args().collect();
 
     if args.len() <= 1 {
@@ -54,7 +58,7 @@ fn main() {
     });
 
     if res.is_err() {
-        eprintln!("ERROR: {}", res.unwrap_err());
+        error!("{}", res.unwrap_err());
         std::process::exit(1);
     }
 }
@@ -146,7 +150,7 @@ fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
         // nothing to do
         Ok(())
     } else {
-        println!(
+        info!(
             "snapshots selected for deletion: {}",
             sorted_names.join(", ")
         );
