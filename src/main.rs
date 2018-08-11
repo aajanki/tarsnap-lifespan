@@ -11,6 +11,8 @@ use chrono::{Duration, NaiveDateTime};
 #[macro_use]
 extern crate indoc;
 
+const TARSNAP_BINARY: &str = "tarsnap";
+
 pub trait SnapshotTimestamp {
     fn timestamp(&self) -> DateTime<Utc>;
 }
@@ -89,7 +91,7 @@ fn parse_generations(generation_args: Vec<String>) -> Result<Vec<Generation>, St
 }
 
 fn list_archives() -> Result<String, String> {
-    Command::new("/usr/bin/tarsnap")
+    Command::new(TARSNAP_BINARY)
         .arg("--list-archives")
         .arg("-v")
         .env("TZ", "0")
@@ -149,7 +151,7 @@ fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
         Ok(())
     } else {
         let snapshot_name_args = sorted_names.iter().flat_map(|name| vec!["-f", name]);
-        Command::new("/usr/bin/tarsnap")
+        Command::new(TARSNAP_BINARY)
             .arg("-d")
             .args(snapshot_name_args)
             .output()
