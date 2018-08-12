@@ -48,7 +48,7 @@ struct Opt {
     /// Don't actually delete anything. Useful together with --verbose
     #[structopt(short = "d", long = "dry-run")]
     dry_run: bool,
-    /// Generations to keep: <number><H|D|M|Y> <...>
+    /// Generations to keep: <number><H|D|W|M|Y> <...>
     #[structopt(parse(from_str))]
     generation_arg: String,
     #[structopt(parse(from_str))]
@@ -99,6 +99,7 @@ fn parse_generations(generation_args: Vec<String>) -> Result<Vec<Generation>, St
 
     let hour_re = Regex::new(r"^(\d+)H$").unwrap();
     let day_re = Regex::new(r"^(\d+)D$").unwrap();
+    let week_re = Regex::new(r"^(\d+)W$").unwrap();
     let month_re = Regex::new(r"^(\d+)M$").unwrap();
     let year_re = Regex::new(r"^(\d+)Y$").unwrap();
 
@@ -108,12 +109,14 @@ fn parse_generations(generation_args: Vec<String>) -> Result<Vec<Generation>, St
             generation_count_from_arg(arg, 1)
         } else if day_re.is_match(arg) {
             generation_count_from_arg(arg, 24)
+        } else if week_re.is_match(arg) {
+            generation_count_from_arg(arg, 7 * 24)
         } else if month_re.is_match(arg) {
             generation_count_from_arg(arg, 30 * 24)
         } else if year_re.is_match(arg) {
             generation_count_from_arg(arg, 365 * 24)
         } else {
-            let mut msg = "Failed to parse argument".to_string();
+            let mut msg = "Failed to parse argument ".to_string();
             msg.push_str(arg);
             Err(msg)
         })
