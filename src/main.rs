@@ -1,17 +1,20 @@
-use std::collections::HashSet;
-use std::env;
-use std::error::Error;
-use std::process::Command;
-
 extern crate regex;
-use regex::Regex;
 extern crate chrono;
-use chrono::prelude::*;
-use chrono::{Duration, NaiveDateTime};
+extern crate stderrlog;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate structopt;
 #[macro_use]
 extern crate indoc;
-#[macro_use] extern crate log;
-extern crate stderrlog;
+
+use std::collections::HashSet;
+use std::error::Error;
+use std::process::Command;
+use regex::Regex;
+use chrono::prelude::*;
+use chrono::{Duration, NaiveDateTime};
+use structopt::StructOpt;
 
 const TARSNAP_BINARY: &str = "tarsnap";
 
@@ -36,26 +39,46 @@ struct Generation {
     count: usize,
 }
 
+#[derive(Debug, StructOpt)]
+struct Opt {
+    /// Show verbose output. Use -vv for even more verbose
+    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+    verbose: usize,
+    /// Don't actually delete anything. Useful together with --verbose
+    #[structopt(short = "d", long = "dry-run")]
+    dry_run: bool,
+    /// Generations to keep: <number><H|D|M|Y> <...>
+    #[structopt(parse(from_str))]
+    generation_arg: String,
+    #[structopt(parse(from_str))]
+    more_generation_args: Vec<String>,
+}
+
 fn main() {
-    stderrlog::new().module(module_path!()).verbosity(2).init().unwrap();
+    let opt = Opt::from_args();
 
-    let args: Vec<_> = env::args().collect();
+    stderrlog::new()
+        .module(module_path!())
+        .verbosity(opt.verbose + 1)
+        .init()
+        .unwrap();
 
-    if args.len() <= 1 {
-        eprintln!("Usage:");
-        eprintln!("{} <number><H|D|M|Y> <...>", args[0]);
-        std::process::exit(1);
-    }
+    let mut generation_args = Vec::new();
+    generation_args.push(opt.generation_arg.clone());
+    generation_args.extend(opt.more_generation_args.iter().cloned());
 
     let now = Utc::now();
-    let res = parse_generations(args.iter().skip(1).cloned().collect()).and_then(|generations| {
-        list_archives()
-            .and_then(parse_archives)
-            .map(|snapshots| {
-                select_snapshots_to_delete(&generations, &now, snapshots)
-            })
-            .and_then(delete_snapshots)
-    });
+    debug!("Current time is {}", now);
+
+    let res = parse_generations(generation_args.iter().skip(1).cloned().collect())
+        .and_then(|generations| {
+            list_archives()
+                .and_then(parse_archives)
+                .map(|snapshots| {
+                    select_snapshots_to_delete(&generations, &now, snapshots)
+                })
+                .and_then(|names| delete_snapshots(names, opt.dry_run))
+        });
 
     if res.is_err() {
         error!("{}", res.unwrap_err());
@@ -102,7 +125,10 @@ fn list_archives() -> Result<String, String> {
         .output()
         .map_err(|err| err.to_string())
         .and_then(|output| if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+            let archives = String::from_utf8_lossy(&output.stdout).to_string();
+            debug!("Archives list:\n{}", archives);
+
+            Ok(archives)
         } else {
             Err(String::from_utf8_lossy(&output.stderr).to_string())
         })
@@ -142,12 +168,12 @@ fn parse_local_datetime_from_str(s: &str) -> Result<DateTime<Utc>, String> {
         .map_err(|err| err.description().to_string())
 }
 
-fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
+fn delete_snapshots(snapshot_names: Vec<String>, dry_run: bool) -> Result<(), String> {
     let mut sorted_names = snapshot_names.clone();
     sorted_names.sort_unstable();
 
     if sorted_names.is_empty() {
-        // nothing to do
+        info!("Didn't find anything to expire");
         Ok(())
     } else {
         info!(
@@ -155,17 +181,21 @@ fn delete_snapshots(snapshot_names: Vec<String>) -> Result<(), String> {
             sorted_names.join(", ")
         );
 
-        let snapshot_name_args = sorted_names.iter().flat_map(|name| vec!["-f", name]);
-        Command::new(TARSNAP_BINARY)
-            .arg("-d")
-            .args(snapshot_name_args)
-            .output()
-            .map_err(|err| err.to_string())
-            .and_then(|output| if output.status.success() {
-                Ok(())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).to_string())
-            })
+        if dry_run {
+            Ok(())
+        } else {
+            let snapshot_name_args = sorted_names.iter().flat_map(|name| vec!["-f", name]);
+            Command::new(TARSNAP_BINARY)
+                .arg("-d")
+                .args(snapshot_name_args)
+                .output()
+                .map_err(|err| err.to_string())
+                .and_then(|output| if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(String::from_utf8_lossy(&output.stderr).to_string())
+                })
+        }
     }
 }
 
