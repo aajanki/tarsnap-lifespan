@@ -34,6 +34,7 @@ impl SnapshotTimestamp for Snapshot {
     }
 }
 
+#[derive(Debug)]
 struct Generation {
     interval: Duration,
     count: usize,
@@ -70,8 +71,10 @@ fn main() {
     let now = Utc::now();
     debug!("Current time is {}", now);
 
-    let res = parse_generations(generation_args.iter().skip(1).cloned().collect())
+    let res = parse_generations(generation_args)
         .and_then(|generations| {
+            debug!("Parsed generations: {:?}", generations);
+
             list_archives()
                 .and_then(parse_archives)
                 .map(|snapshots| {
