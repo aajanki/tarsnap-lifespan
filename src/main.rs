@@ -1,5 +1,5 @@
 /*
-tarsnap_rotate
+tarsnap-lifespan
 Copyright 2018 Antti Ajanki <antti.ajanki@iki.fi>
 
 The MIT License(MIT)

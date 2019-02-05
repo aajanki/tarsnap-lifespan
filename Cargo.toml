@@ -1,5 +1,5 @@
 [package]
-name = "tarsnap_rotate"
+name = "tarsnap-lifespan"
 version = "0.1.0"
 authors = ["Antti Ajanki <antti.ajanki@iki.fi>"]
 

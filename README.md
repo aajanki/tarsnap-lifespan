@@ -1,8 +1,8 @@
-# tarsnap_rotate
+# tarsnap-lifespan
 
-tarsnap_rotate expires [tarsnap](https://www.tarsnap.com/) backups according the [grandfather-father-son](https://en.wikipedia.org/wiki/Backup_rotation_scheme#Grandfather-father-son) backup rotation scheme. In other words, it keeps a specific number of daily, weekly, and monthly backups.
+tarsnap-lifespan expires [tarsnap](https://www.tarsnap.com/) backups following the [grandfather-father-son](https://en.wikipedia.org/wiki/Backup_rotation_scheme#Grandfather-father-son) backup rotation scheme. In other words, it keeps a specific number of daily, weekly, and monthly backups.
 
-This application only expires old backups. You need to setup a script for making the backups separately. The names of the backups do not need to include the timestamp or follow any other specific template.
+This application only expires old backups. You need to separately setup a script for actually creating the backups. The names of the backups can be free-form, they do not need to include the timestamp.
 
 ## Compiling
 
@@ -22,12 +22,12 @@ The backup rotation generations are given as command line arguments: `<number_of
 
 Example: To keep 31 daily, 10 weekly and 12 monthly backups, and to print the expired backups, run:
 ```
-target/debug/tarsnap_rotate -v 31D 10W 12M
+target/debug/tarsnap-lifespan -v 31D 10W 12M
 ```
 
 ## License 
 
-* The MIT licence. See the [LICENSE](LICENSE) file.
+The MIT licence. See the [LICENSE](LICENSE) file.
 
 ## Developer contact
 
